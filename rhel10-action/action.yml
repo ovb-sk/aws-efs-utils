@@ -1,0 +1,12 @@
+name: "Build aws-efs-utils for RHEL 10"
+
+description: "Build utilities for Amazon Elastic File System (EFS) for RHEL 10"
+
+inputs:
+  version:
+    description: "The version to build"
+    required: true
+
+runs:
+  using: "docker"
+  image: "Dockerfile"

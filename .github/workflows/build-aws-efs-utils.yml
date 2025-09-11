@@ -1,0 +1,159 @@
+name: Build RPMs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "25 5 * * 0" # 5:25 am UTC on Sundays
+
+permissions:
+  contents: read
+
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    name: Check if release exists
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check if release exists for latest upstream version
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Clone the upstream repository to get the latest tag
+          git clone --depth 1 https://github.com/aws/efs-utils upstream-check
+          cd upstream-check
+
+          # Get the latest tag (strip v prefix if present)
+          LATEST_TAG=$(git describe --tags --abbrev=0 | sed 's/^v//')
+          echo "Latest upstream tag: v${LATEST_TAG}"
+
+          cd ..
+          rm -rf upstream-check
+
+          # Check if release already exists in this repository
+          if gh release view "v${LATEST_TAG}" &> /dev/null; then
+            echo "::notice::Release v${LATEST_TAG} already exists - skipping build"
+            echo "Release v${LATEST_TAG} already exists. Nothing to do."
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Release v${LATEST_TAG} does not exist - proceeding with build"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+          echo "version=${LATEST_TAG}" >> $GITHUB_OUTPUT
+
+  build-rhel9:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    permissions:
+      contents: read
+      actions: write # to allow the workflow to upload artifacts
+    runs-on: ubuntu-latest
+    name: Build AWS EFS Utils for RHEL 9
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout this repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build the RPMs for RHEL 9
+        id: build-rpms
+        uses: ./rhel9-action
+        with:
+          version: ${{ needs.check-release.outputs.version }}
+
+      - name: Upload the RPMs as artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aws-efs-utils-${{ needs.check-release.outputs.version }}-rhel9-rpms
+          path: |
+            rpms-output/*.rpm
+            !rpms-output/*debug*.rpm
+
+  build-rhel10:
+    needs: check-release
+    if: needs.check-release.outputs.should_build == 'true'
+    permissions:
+      contents: read
+      actions: write # to allow the workflow to upload artifacts
+    runs-on: ubuntu-latest
+    name: Build AWS EFS Utils for RHEL 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout this repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build the RPMs for RHEL 10
+        id: build-rpms
+        uses: ./rhel10-action
+        with:
+          version: ${{ needs.check-release.outputs.version }}
+
+      - name: Upload the RPMs as artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aws-efs-utils-${{ needs.check-release.outputs.version }}-rhel10-rpms
+          path: |
+            rpms-output/*.rpm
+            !rpms-output/*debug*.rpm
+
+  create-release:
+    needs: [check-release, build-rhel9, build-rhel10]
+    if: needs.check-release.outputs.should_build == 'true'
+    permissions:
+      contents: write # to allow the job to create releases
+      actions: read
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ needs.check-release.outputs.version }}
+
+          # List all downloaded RPMs
+          echo "RPMs available for release:"
+          find artifacts -name "*.rpm" -type f
+
+          # Create the release with all RPM files (using find to get correct paths)
+          gh release create "v${VERSION}" \
+            --title "AWS EFS Utils v${VERSION}" \
+            --notes "Automated release of AWS EFS Utils RPMs
+
+          Built from upstream version v${VERSION}
+
+          ## Contents
+          - RPM packages for RHEL 9 and RHEL 10" \
+            $(find artifacts -name "*.rpm" -type f)
+
+          echo "Release created successfully"
+
