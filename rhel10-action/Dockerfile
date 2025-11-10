@@ -1,4 +1,4 @@
-FROM redhat/ubi10@sha256:fe8738a6e2fb7595227c058b18250ff60a8a3ea0078296d8b46e0a419738a69c
+FROM redhat/ubi10@sha256:27251e29658cf10b31914ab9f2630d3f5b0d17d2996ee2dd7d6e2c091a84ab1b
 
 # Update package manager and system
 RUN dnf update -y && dnf clean all
