@@ -1,4 +1,4 @@
-FROM redhat/ubi9@sha256:8f1496d50a66e41433031bf5bdedd4635520e692ccd76ffcb649cf9d30d669af
+FROM redhat/ubi9@sha256:75937d9d75e976023814c7b8418016148c70b53fdbd7493636980a0de2126bdc
 
 # Update
 RUN dnf update -y && dnf clean all
